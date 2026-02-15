@@ -1,4 +1,3 @@
-
 # Gourmetta HACCP System - Ubuntu Deployment Guide
 
 This guide provides steps to install and run the Gourmetta HACCP platform on a local Ubuntu server.
@@ -64,3 +63,15 @@ pm2 serve dist 8080 --name gourmetta-frontend --spa
 ```
 
 The application will now be available at `http://your-server-ip:8080`.
+
+## 5. How to Update
+
+Whenever you make changes here and push them to GitHub, run this on your server:
+
+```bash
+# Make the script executable (only needs to be done once)
+chmod +x update.sh
+
+# Run the update
+./update.sh
+```

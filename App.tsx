@@ -22,8 +22,6 @@ import { FacilityAnalyticsPage } from './pages/FacilityAnalytics';
 import { RemindersPage } from './pages/Reminders';
 
 const API_BASE = 'http://localhost:3001/api';
-
-// Add missing LOGO_URL constant for branding
 const LOGO_URL = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.256 1.181-3.103.493.969.819 2.087.819 3.103z'/%3E%3C/svg%3E";
 
 const App: React.FC = () => {
@@ -32,20 +30,31 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>(AdminTab.DASHBOARD);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
   
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  // Synchronized States
-  const [users, setUsers] = useState<User[]>([]);
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [fridges, setFridges] = useState<Refrigerator[]>([]);
+  // --- INITIAL MOCK DATA (Seeded for Demo Mode) ---
+  const [users, setUsers] = useState<User[]>([
+    { id: 'U1', name: 'Demo Administrator', username: 'admin', role: 'SuperAdmin', status: 'Active' },
+    { id: 'U2', name: 'Demo Mitarbeiter', username: 'user', role: 'User', status: 'Active', facilityId: 'F1' }
+  ]);
+  const [facilities, setFacilities] = useState<Facility[]>([
+    { id: 'F1', name: 'Zentral-Kantine Gourmetta', refrigeratorCount: 2, typeId: 'FT1', cookingMethodId: 'CM1', supervisorId: 'U1' }
+  ]);
+  const [fridges, setFridges] = useState<Refrigerator[]>([
+    { id: 'R1', name: 'Kühlschrank Hauptlager', facilityId: 'F1', currentTemp: 4.2, status: 'Optimal', typeName: 'Kühlschrank (+2 bis +7°C)' },
+    { id: 'R2', name: 'TK-Schrank Fleisch', facilityId: 'F1', currentTemp: -18.5, status: 'Optimal', typeName: 'Tiefkühler (-18 bis -22°C)' }
+  ]);
   const [readings, setReadings] = useState<Reading[]>([]);
   const [formResponses, setFormResponses] = useState<FormResponse[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [reminders, setReminders] = useState<ReminderConfig[]>([]);
 
-  // Static/Config States (Managed in Settings)
+  // Config States
   const [fridgeTypes, setFridgeTypes] = useState<RefrigeratorType[]>([
     { id: 'RT1', name: 'Kühlschrank (+2 bis +7°C)', checkpoints: [{ name: 'Luft', minTemp: 2, maxTemp: 7 }] },
     { id: 'RT2', name: 'Tiefkühler (-18 bis -22°C)', checkpoints: [{ name: 'Luft', minTemp: -22, maxTemp: -18 }] }
@@ -69,43 +78,44 @@ const App: React.FC = () => {
       createdAt: '2024-01-01' 
     }
   ]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [reminders, setReminders] = useState<ReminderConfig[]>([]);
 
   const [legalTexts, setLegalTexts] = useState({
     imprint: "Gourmetta Gastronomie GmbH\nAn der Priessnitzaue 28\n01328 Dresden",
     privacy: "Datenhaltung in lokaler PostgreSQL Instanz."
   });
 
-  // API Methods
+  // --- API LOGIC ---
   const fetchData = useCallback(async () => {
-    if (!authToken) return;
+    if (!authToken || isDemoMode) return;
     try {
       setIsSyncing(true);
       const headers = { 'Authorization': `Bearer ${authToken}` };
-      
       const [readingsRes] = await Promise.all([
         fetch(`${API_BASE}/readings`, { headers }).then(r => r.json()),
       ]);
-      
       setReadings(readingsRes);
       setIsSyncing(false);
     } catch (e) {
       console.error("Sync failed", e);
       setIsSyncing(false);
     }
-  }, [authToken]);
+  }, [authToken, isDemoMode]);
 
   useEffect(() => {
     if (isAuthenticated) fetchData();
   }, [isAuthenticated, fetchData]);
 
+  // --- SMART LOGIN (DATABASE WITH DEMO FALLBACK) ---
   const handleLogin = async (username: string, password?: string) => {
+    const cleanUsername = username.toLowerCase().trim();
+    const cleanPassword = password?.trim() || '';
+
     try {
+      // 1. Attempt Database Login
       const res = await fetch(`${API_BASE}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username: cleanUsername, password: cleanPassword })
       });
       
       if (res.ok) {
@@ -113,30 +123,30 @@ const App: React.FC = () => {
         setCurrentUser(user);
         setAuthToken(token);
         setIsAuthenticated(true);
+        setIsDemoMode(false);
         setActiveTab(user.role === 'User' ? 'user_workspace' : AdminTab.DASHBOARD);
-      } else {
-        alert("Login fehlgeschlagen. Bitte prüfen Sie Ihre Verbindung zur lokalen Datenbank.");
+        return;
       }
     } catch (e) {
-      alert("Lokaler Server nicht erreichar. Bitte starten Sie 'node server.js'.");
+      console.warn("Local backend not detected. Switching to Demo Fallback mode.");
     }
-  };
 
-  const logAction = useCallback((action: AuditLog['action'], entity: string, details: string) => {
-    console.log(`Audit: ${action} - ${entity} - ${details}`);
-    // Future: POST to /api/audit
-  }, []);
-
-  const queueData = async (type: 'reading' | 'form', data: any) => {
-    if (type === 'reading') {
-      setReadings(prev => [data, ...prev]);
-      await fetch(`${API_BASE}/readings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-        body: JSON.stringify(data)
-      });
+    // 2. Demo Fallback Logic (if server is offline or previewing)
+    if (cleanUsername === 'admin' && cleanPassword === 'admin') {
+      const mockAdmin = users.find(u => u.username === 'admin') || users[0];
+      setCurrentUser(mockAdmin);
+      setIsAuthenticated(true);
+      setIsDemoMode(true);
+      setActiveTab(AdminTab.DASHBOARD);
+    } else if (cleanUsername === 'user' && cleanPassword === 'user') {
+      const mockUser = users.find(u => u.username === 'user') || users[1];
+      setCurrentUser(mockUser);
+      setIsAuthenticated(true);
+      setIsDemoMode(true);
+      setActiveTab('user_workspace');
+    } else {
+      alert("Falsche Anmeldedaten.\n\nPROFITIPP:\n- Nutzen Sie 'admin' / 'admin' für das Management\n- Nutzen Sie 'user' / 'user' für das Service-Terminal");
     }
-    // Handle form responses similarly
   };
 
   const handleLogout = () => {
@@ -145,6 +155,30 @@ const App: React.FC = () => {
     setAuthToken(null);
   };
 
+  const queueData = async (type: 'reading' | 'form', data: any) => {
+    if (type === 'reading') {
+      setReadings(prev => [data, ...prev]);
+      if (!isDemoMode && authToken) {
+        await fetch(`${API_BASE}/readings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+          body: JSON.stringify(data)
+        });
+      }
+    }
+  };
+
+  const logAction = useCallback((action: AuditLog['action'], entity: string, details: string) => {
+    const newLog: AuditLog = {
+      id: `LOG-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      userId: currentUser?.id || 'SYSTEM',
+      userName: currentUser?.name || 'System',
+      action, entity, details
+    };
+    setAuditLogs(prev => [newLog, ...prev]);
+  }, [currentUser]);
+
   if (!isAuthenticated || !currentUser) {
     return (
       <Login 
@@ -152,7 +186,7 @@ const App: React.FC = () => {
         currentLanguage={language} 
         onLanguageChange={setLanguage} 
         onLogin={handleLogin} 
-        users={[]} // Handled by API
+        users={[]} 
         legalTexts={legalTexts}
       />
     );
@@ -185,6 +219,12 @@ const App: React.FC = () => {
       default: 
         return (
           <div className="space-y-10 animate-in fade-in duration-700 text-left pb-16">
+            {isDemoMode && (
+              <div className="bg-amber-500 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center space-x-3 shadow-lg animate-bounce">
+                <span>⚠️</span>
+                <span>Demo-Modus aktiv: Lokaler Server wurde nicht gefunden.</span>
+              </div>
+            )}
             <div className="bg-white dark:bg-slate-900 p-10 rounded-[3.5rem] border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col md:flex-row items-center md:items-start justify-between gap-8 relative overflow-hidden">
                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full -mr-20 -mt-20 blur-3xl pointer-events-none" />
                <div className="flex flex-col md:flex-row items-center space-y-6 md:space-y-0 md:space-x-8 z-10">
@@ -197,7 +237,7 @@ const App: React.FC = () => {
                   </div>
                </div>
             </div>
-            {/* KPI Stats Here */}
+            {/* KPI Stats or Dashboard Cards can go here */}
           </div>
         );
     }
